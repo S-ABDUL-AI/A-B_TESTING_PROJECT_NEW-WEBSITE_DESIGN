@@ -4,5 +4,5 @@ scipy
 statsmodels
 matplotlib
 seaborn
-streamlit
+streamlit>=1.43.0,<2
 altair
