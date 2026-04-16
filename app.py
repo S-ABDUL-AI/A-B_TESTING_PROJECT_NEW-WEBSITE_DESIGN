@@ -27,6 +27,30 @@ _TRUST_CSS = """
     div[data-testid="stMetricDelta"] { font-size: 0.9rem; }
     h1 { color: #0052CC !important; font-weight: 700 !important; }
     h2, h3 { color: #253858 !important; }
+    .ab-kpi-row { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 8px; }
+    .ab-kpi-card {
+        flex: 1 1 200px;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        border-radius: 10px;
+        padding: 16px 18px;
+        box-shadow: 0 1px 3px rgba(37,56,88,0.08);
+        border: 1px solid #e2e8f0;
+        border-left-width: 5px;
+        min-height: 118px;
+    }
+    .ab-kpi-label { color: #64748b; font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+    .ab-kpi-value { color: #253858; font-size: 1.55rem; font-weight: 700; line-height: 1.2; margin-top: 6px; }
+    .ab-kpi-sub { color: #475569; font-size: 0.88rem; margin-top: 8px; line-height: 1.35; }
+    .ab-insight-box {
+        border-radius: 12px;
+        padding: 20px 22px;
+        margin: 16px 0 8px 0;
+        border: 1px solid #e2e8f0;
+        background: #f8fafc;
+    }
+    .ab-insight-kicker { color: #0052CC; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+    .ab-insight-lead { color: #253858; font-size: 1.25rem; font-weight: 800; line-height: 1.35; margin: 10px 0 12px 0; }
+    .ab-insight-body { color: #334155; font-size: 0.98rem; line-height: 1.55; }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -48,6 +72,15 @@ def _wald_ci(success: int, n: int, z: float) -> tuple[float, float, float]:
     p = success / n
     se = np.sqrt(max(p * (1 - p) / n, 0.0))
     return p, max(0.0, p - z * se), min(1.0, p + z * se)
+
+
+def _kpi_card_html(label: str, value: str, sub: str, accent: str) -> str:
+    return (
+        f'<div class="ab-kpi-card" style="border-left-color:{accent};">'
+        f'<div class="ab-kpi-label">{label}</div>'
+        f'<div class="ab-kpi-value">{value}</div>'
+        f'<div class="ab-kpi-sub">{sub}</div></div>'
+    )
 
 
 def _normal_pdf_grid(mean: float, se: float, label: str) -> pd.DataFrame:
@@ -205,62 +238,133 @@ if not required_cols.issubset(df.columns):
 out = run_ab_analysis(df, confidence_level)
 alpha_level = alpha
 sig = out["p_value"] < alpha_level
+b_ahead = out["rate_b"] > out["rate_a"]
+b_wins = sig and b_ahead
+a_wins = sig and not b_ahead and out["rate_b"] < out["rate_a"]
+tie_rates = abs(out["rate_b"] - out["rate_a"]) < 1e-12
 
-# --- Top KPI row (Staff-level: deltas + sample size) ---
-k1, k2, k3, k4 = st.columns(4)
-with k1:
-    st.metric(
-        "Conv. rate — A",
+# Accent palette (high-trust, respectful)
+COL_WIN = "#0d9488"
+COL_CONTROL = "#64748b"
+COL_TREAT = "#0052CC"
+COL_LIFT_POS = "#047857"
+COL_LIFT_NEG = "#b45309"
+COL_NEUTRAL = "#475569"
+
+accent_a = COL_WIN if a_wins else (COL_CONTROL if b_wins else COL_CONTROL)
+accent_b = COL_WIN if b_wins else (COL_CONTROL if a_wins else COL_TREAT)
+if tie_rates and not sig:
+    accent_a = accent_b = COL_CONTROL
+
+lift_pp = out["lift_pp"]
+rel = out["rel_lift"]
+if sig:
+    accent_lift = COL_LIFT_POS if lift_pp > 0 else (COL_LIFT_NEG if lift_pp < 0 else COL_NEUTRAL)
+else:
+    accent_lift = COL_NEUTRAL
+rel_line = f"Relative change vs A: <strong>{rel:+.2f}%</strong>" if rel == rel else "Relative change: —"
+lift_sub = (
+    f"{rel_line}<br/>{int(confidence_level * 100)}% CI — A: [{out['lo_a']:.1%}, {out['hi_a']:.1%}] · "
+    f"B: [{out['lo_b']:.1%}, {out['hi_b']:.1%}]"
+)
+
+kpi_html = (
+    '<div class="ab-kpi-row">'
+    + _kpi_card_html(
+        "Group A · Conversion",
         f"{out['rate_a']:.2%}",
-        delta=f"n = {out['n_a']:,}",
-        delta_color="off",
-        help=f"95% Wald-style interval (display): [{out['lo_a']:.1%}, {out['hi_a']:.1%}]",
+        f"n = {out['n_a']:,} · Control / baseline",
+        accent_a,
     )
-with k2:
-    st.metric(
-        "Conv. rate — B",
+    + _kpi_card_html(
+        "Group B · Conversion",
         f"{out['rate_b']:.2%}",
-        delta=f"{out['lift_pp']:+.2f} pp vs A",
-        delta_color="normal",
-        help=f"95% Wald-style interval (display): [{out['lo_b']:.1%}, {out['hi_b']:.1%}]",
+        f"n = {out['n_b']:,} · Treatment",
+        accent_b,
     )
-with k3:
-    rel = out["rel_lift"]
-    delta_txt = "Lift" if out["lift_pp"] >= 0 else "Drop"
-    st.metric(
-        "Lift / drop (B vs A)",
-        f"{rel:+.2f}%" if rel == rel else "—",
-        delta=delta_txt,
-        delta_color="normal",
-        help="Percentage points (pp) and relative % change vs group A.",
+    + _kpi_card_html(
+        "Lift (B vs A)",
+        f"{lift_pp:+.2f} pp",
+        lift_sub,
+        accent_lift,
     )
-with k4:
-    st.metric(
-        "Sample size",
-        f"{out['n_a'] + out['n_b']:,}",
-        delta=f"α = {alpha_level:.3f}",
-        delta_color="off",
-        help="Total observations used in this test.",
+    + _kpi_card_html(
+        "Evidence strength",
+        "Significant" if sig else "Not significant",
+        f"p-value = {out['p_value']:.4f} · α = {alpha_level:.3f} · two-sided Z-test",
+        COL_WIN if sig else COL_NEUTRAL,
     )
+    + "</div>"
+)
+st.markdown(kpi_html, unsafe_allow_html=True)
 
-if sig and out["rate_b"] > out["rate_a"]:
+# --- Statistical verdict (success = significant; error = inconclusive) ---
+if b_wins:
     st.success(
-        "**STATISTICALLY SIGNIFICANT: Variant B is the winner.**\n\n"
-        "Observed lift is significant at the selected confidence level. Validate guardrails "
-        "(SRM, novelty effects, seasonality) before full rollout."
+        "**STATISTICALLY SIGNIFICANT** — Variant **B** outperforms A on conversion at your chosen "
+        f"confidence level (p = {out['p_value']:.4f} < α = {alpha_level:.3f})."
     )
-elif sig and out["rate_b"] < out["rate_a"]:
-    st.warning(
-        "**STATISTICALLY SIGNIFICANT: Variant A is the winner.**\n\n"
-        "Variant B underperforms at the selected confidence level. Investigate UX and traffic "
-        "quality before another treatment launch."
+elif a_wins:
+    st.success(
+        "**STATISTICALLY SIGNIFICANT** — Variant **A** outperforms B on conversion at your chosen "
+        f"confidence level (p = {out['p_value']:.4f} < α = {alpha_level:.3f}). "
+        "Do not roll out treatment B as tested."
+    )
+elif tie_rates and sig:
+    st.success(
+        "**STATISTICALLY SIGNIFICANT** — Estimated rates are tied; the test detects a negligible "
+        f"effect (p = {out['p_value']:.4f}). Prefer business tie-breakers or more precision."
     )
 else:
-    st.info(
-        "**INCONCLUSIVE: More data required.**\n\n"
-        "Current evidence does not separate variants at the selected alpha. Extend runtime, "
-        "increase sample size, or segment by key cohorts."
+    st.error(
+        "**NOT STATISTICALLY SIGNIFICANT** — Results are **inconclusive** at α = "
+        f"{alpha_level:.3f} (p = {out['p_value']:.4f}). **Recommendation:** extend the experiment "
+        "or increase power before making a launch decision."
     )
+
+# --- Storytelling: bold executive insight ---
+if b_wins:
+    insight_lead = (
+        f"Ship variant **B** toward staged rollout: observed **+{lift_pp:.2f} pp** "
+        f"({rel:+.1f}% relative vs A) with statistical backing."
+        if rel == rel
+        else f"Ship variant **B** toward staged rollout: observed **+{lift_pp:.2f} pp** with statistical backing."
+    )
+    insight_body = (
+        "Next: confirm **sample ratio mismatch (SRM)**, **novelty/holdout**, and **cohort slices** "
+        "(device, geography) before promoting to 100%. Document the decision in your experiment log."
+    )
+elif a_wins:
+    insight_lead = (
+        f"**Hold** treatment B: it trails control by **{abs(lift_pp):.2f} pp** "
+        f"({rel:.1f}% relative vs A) with significance."
+        if rel == rel
+        else f"**Hold** treatment B: it trails control by **{abs(lift_pp):.2f} pp** with significance."
+    )
+    insight_body = (
+        "Next: qualitative review of B (UX, latency, audience mismatch), then iterate the treatment "
+        "or run a follow-up with a clearer hypothesis."
+    )
+else:
+    insight_lead = (
+        "**No launch decision yet** — uncertainty intervals overlap enough that the test cannot "
+        "separate A and B at this alpha."
+    )
+    insight_body = (
+        "Next: run longer, raise traffic split, or pre-register a **minimum detectable effect (MDE)** "
+        "so stakeholders know when to stop."
+    )
+
+st.markdown(
+    f"""
+<div class="ab-insight-box">
+  <div class="ab-insight-kicker">Executive insight</div>
+  <div class="ab-insight-lead">{insight_lead}</div>
+  <div class="ab-insight-body">{insight_body}</div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 st.divider()
 
@@ -279,6 +383,10 @@ st.divider()
 
 # --- Visual analysis ---
 st.subheader("Visual analysis")
+st.caption(
+    "Point estimates with 95% confidence intervals (Wald). Overlap signals remaining uncertainty; "
+    "significance still follows the formal two-proportion test."
+)
 
 ci_chart_df = pd.DataFrame(
     {
@@ -289,12 +397,22 @@ ci_chart_df = pd.DataFrame(
     }
 )
 
+if b_wins:
+    ci_colors = ["#64748b", "#0d9488"]
+elif a_wins:
+    ci_colors = ["#0d9488", "#d97706"]
+else:
+    ci_colors = ["#475569", "#0052CC"]
+
+ci_scale = alt.Scale(domain=["A", "B"], range=ci_colors)
+
 points = (
     alt.Chart(ci_chart_df)
-    .mark_point(filled=True, size=120, color="#0052CC")
+    .mark_point(filled=True, size=140, stroke="#fff", strokeWidth=2)
     .encode(
-        x=alt.X("group:N", title="Variant"),
+        x=alt.X("group:N", title="Variant", sort=["A", "B"]),
         y=alt.Y("conversion_rate:Q", title="Conversion rate", scale=alt.Scale(domain=[0, 1])),
+        color=alt.Color("group:N", scale=ci_scale, legend=alt.Legend(title="Variant")),
         tooltip=[
             alt.Tooltip("group:N", title="Group"),
             alt.Tooltip("conversion_rate:Q", title="Rate", format=".2%"),
@@ -305,17 +423,17 @@ points = (
 )
 error_bars = (
     alt.Chart(ci_chart_df)
-    .mark_errorbar(color="#253858")
+    .mark_errorbar(thickness=2)
     .encode(
-        x="group:N",
+        x=alt.X("group:N", sort=["A", "B"]),
         y=alt.Y("ci_low:Q", title="Conversion rate"),
         y2="ci_high:Q",
+        color=alt.Color("group:N", scale=ci_scale, legend=None),
     )
 )
 chart_conv = (error_bars + points).properties(
-    title="Conversion rate with approximate 95% intervals (Wald)",
-    height=400,
-    width=500,
+    title=f"{int(confidence_level * 100)}% confidence intervals — conversion rate by variant",
+    height=420,
 )
 st.altair_chart(chart_conv, use_container_width=True)
 
@@ -329,16 +447,23 @@ dist_df = pd.concat(
     ],
     ignore_index=True,
 )
+if b_wins:
+    dist_colors = ["#64748b", "#0d9488"]
+elif a_wins:
+    dist_colors = ["#0d9488", "#d97706"]
+else:
+    dist_colors = ["#475569", "#0052CC"]
+
 dist_chart = (
     alt.Chart(dist_df)
-    .mark_area(opacity=0.35)
+    .mark_area(opacity=0.38)
     .encode(
         x=alt.X("rate:Q", title="Conversion rate", axis=alt.Axis(format="%"), scale=alt.Scale(domain=[0, 1])),
         y=alt.Y("density:Q", title="Relative likelihood"),
         color=alt.Color(
             "group:N",
             title="Group",
-            scale=alt.Scale(domain=["Group A", "Group B"], range=["#253858", "#0052CC"]),
+            scale=alt.Scale(domain=["Group A", "Group B"], range=dist_colors),
         ),
         tooltip=[
             alt.Tooltip("group:N", title="Group"),
