@@ -51,6 +51,24 @@ _TRUST_CSS = """
     .ab-insight-kicker { color: #0052CC; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
     .ab-insight-lead { color: #253858; font-size: 1.25rem; font-weight: 800; line-height: 1.35; margin: 10px 0 12px 0; }
     .ab-insight-body { color: #334155; font-size: 0.98rem; line-height: 1.55; }
+    .ab-chart-narrative {
+        margin: 14px 0 20px 0;
+        padding: 14px 16px 16px 16px;
+        border-radius: 10px;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-left: 5px solid #0052CC;
+    }
+    .ab-chart-narrative .ab-chart-narrative-title {
+        color: #64748b;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+    }
+    .ab-chart-narrative p { margin: 0 0 8px 0; font-size: 0.95rem; line-height: 1.55; color: #334155; }
+    .ab-chart-narrative p:last-child { margin-bottom: 0; }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -397,21 +415,36 @@ ci_chart_df = pd.DataFrame(
     }
 )
 
-if b_wins:
-    ci_colors = ["#64748b", "#0d9488"]
-elif a_wins:
-    ci_colors = ["#0d9488", "#d97706"]
-else:
-    ci_colors = ["#475569", "#0052CC"]
-
-ci_scale = alt.Scale(domain=["A", "B"], range=ci_colors)
+# Same hexes as the KPI card left-border accents (straight-through brand consistency)
+ci_scale = alt.Scale(domain=["A", "B"], range=[accent_a, accent_b])
+x_axis_variant = alt.X(
+    "group:N",
+    title="Variant",
+    sort=["A", "B"],
+    axis=alt.Axis(
+        labelAngle=0,
+        labelAlign="center",
+        labelBaseline="middle",
+        labelFontWeight="bold",
+        labelFontSize=14,
+        titleFontWeight="bold",
+        titlePadding=12,
+    ),
+)
+_rate_scale = alt.Scale(domain=[0, 1])
+_rate_axis = alt.Axis(format="%", titleFontWeight="bold")
 
 points = (
     alt.Chart(ci_chart_df)
     .mark_point(filled=True, size=140, stroke="#fff", strokeWidth=2)
     .encode(
-        x=alt.X("group:N", title="Variant", sort=["A", "B"]),
-        y=alt.Y("conversion_rate:Q", title="Conversion rate", scale=alt.Scale(domain=[0, 1])),
+        x=x_axis_variant,
+        y=alt.Y(
+            "conversion_rate:Q",
+            title="Conversion rate",
+            scale=_rate_scale,
+            axis=_rate_axis,
+        ),
         color=alt.Color("group:N", scale=ci_scale, legend=alt.Legend(title="Variant")),
         tooltip=[
             alt.Tooltip("group:N", title="Group"),
@@ -425,17 +458,60 @@ error_bars = (
     alt.Chart(ci_chart_df)
     .mark_errorbar(thickness=2)
     .encode(
-        x=alt.X("group:N", sort=["A", "B"]),
-        y=alt.Y("ci_low:Q", title="Conversion rate"),
+        x=x_axis_variant,
+        y=alt.Y("ci_low:Q", scale=_rate_scale, axis=None),
         y2="ci_high:Q",
         color=alt.Color("group:N", scale=ci_scale, legend=None),
     )
 )
-chart_conv = (error_bars + points).properties(
-    title=f"{int(confidence_level * 100)}% confidence intervals — conversion rate by variant",
-    height=420,
+chart_conv = (
+    (error_bars + points)
+    .properties(
+        title=alt.TitleParams(
+            text=f"{int(confidence_level * 100)}% confidence intervals — conversion rate by variant",
+            fontSize=16,
+            fontWeight="bold",
+            color="#253858",
+            anchor="start",
+        ),
+        height=420,
+    )
+    .configure_axisX(labelAngle=0, labelFontWeight="bold", labelFontSize=14, titleFontWeight="bold")
+    .configure_axisY(titleFontWeight="bold")
+    .configure_view(stroke=None)
 )
 st.altair_chart(chart_conv, use_container_width=True)
+
+chart_story_a = (
+    f'<span style="color:{accent_a};font-weight:800;">Group A</span> (control) is at '
+    f"<strong>{out['rate_a']:.2%}</strong> with a {int(confidence_level * 100)}% interval "
+    f"<strong>{out['lo_a']:.1%}–{out['hi_a']:.1%}</strong>."
+)
+chart_story_b = (
+    f'<span style="color:{accent_b};font-weight:800;">Group B</span> (treatment) is at '
+    f"<strong>{out['rate_b']:.2%}</strong> with a {int(confidence_level * 100)}% interval "
+    f"<strong>{out['lo_b']:.1%}–{out['hi_b']:.1%}</strong>."
+)
+chart_story_lift = (
+    f"The point gap is <strong>{lift_pp:+.2f} pp</strong>"
+    + (
+        f" (<strong>{rel:+.1f}%</strong> relative vs A)."
+        if rel == rel
+        else "."
+    )
+    + " Bars use the <strong>same accent colors</strong> as the KPI row above."
+)
+st.markdown(
+    f"""
+<div class="ab-chart-narrative" style="border-left-color:{accent_lift};">
+  <div class="ab-chart-narrative-title">Insight narrative · matches KPI palette</div>
+  <p>{chart_story_a}</p>
+  <p>{chart_story_b}</p>
+  <p>{chart_story_lift}</p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 st.markdown("#### Confidence interval overlap (uncertainty distribution)")
 se_a = np.sqrt(max(out["rate_a"] * (1 - out["rate_a"]) / out["n_a"], 0.0))
@@ -447,12 +523,7 @@ dist_df = pd.concat(
     ],
     ignore_index=True,
 )
-if b_wins:
-    dist_colors = ["#64748b", "#0d9488"]
-elif a_wins:
-    dist_colors = ["#0d9488", "#d97706"]
-else:
-    dist_colors = ["#475569", "#0052CC"]
+dist_colors = [accent_a, accent_b]
 
 dist_chart = (
     alt.Chart(dist_df)
