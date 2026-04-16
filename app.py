@@ -50,6 +50,19 @@ def _wald_ci(success: int, n: int, z: float) -> tuple[float, float, float]:
     return p, max(0.0, p - z * se), min(1.0, p + z * se)
 
 
+def _normal_pdf_grid(mean: float, se: float, label: str) -> pd.DataFrame:
+    """Build a smooth normal approximation curve for uncertainty visualization."""
+    if se <= 0:
+        x = np.array([mean])
+        y = np.array([1.0])
+    else:
+        lo = max(0.0, mean - 4 * se)
+        hi = min(1.0, mean + 4 * se)
+        x = np.linspace(lo, hi, 240)
+        y = stats.norm.pdf(x, loc=mean, scale=se)
+    return pd.DataFrame({"rate": x, "density": y, "group": label})
+
+
 @st.cache_data(show_spinner=False)
 def cached_read_upload(upload_bytes: bytes) -> pd.DataFrame:
     return pd.read_csv(io.BytesIO(upload_bytes))
@@ -200,43 +213,53 @@ with k1:
         "Conv. rate — A",
         f"{out['rate_a']:.2%}",
         delta=f"n = {out['n_a']:,}",
+        delta_color="off",
         help=f"95% Wald-style interval (display): [{out['lo_a']:.1%}, {out['hi_a']:.1%}]",
     )
 with k2:
     st.metric(
         "Conv. rate — B",
         f"{out['rate_b']:.2%}",
-        delta=f"n = {out['n_b']:,}",
+        delta=f"{out['lift_pp']:+.2f} pp vs A",
+        delta_color="normal",
         help=f"95% Wald-style interval (display): [{out['lo_b']:.1%}, {out['hi_b']:.1%}]",
     )
 with k3:
     rel = out["rel_lift"]
-    delta_txt = f"{rel:+.1f}% vs A" if rel == rel else "—"
+    delta_txt = "Lift" if out["lift_pp"] >= 0 else "Drop"
     st.metric(
-        "Relative lift (B vs A)",
-        f"{out['lift_pp']:+.2f} pp",
+        "Lift / drop (B vs A)",
+        f"{rel:+.2f}%" if rel == rel else "—",
         delta=delta_txt,
+        delta_color="normal",
         help="Percentage points (pp) and relative % change vs group A.",
     )
 with k4:
     st.metric(
-        "p-value (two-sided)",
-        f"{out['p_value']:.4f}",
-        delta="Significant" if sig else "Not significant",
-        delta_color="normal" if sig else "off",
-        help=f"Compared to α = {alpha_level:.3f}",
+        "Sample size",
+        f"{out['n_a'] + out['n_b']:,}",
+        delta=f"α = {alpha_level:.3f}",
+        delta_color="off",
+        help="Total observations used in this test.",
     )
 
-if sig:
+if sig and out["rate_b"] > out["rate_a"]:
     st.success(
-        "**Go / experiment:** At the selected confidence level, the difference in conversion rates "
-        "between A and B is statistically significant. Confirm business guardrails (seasonality, "
-        "novelty, sample ratio mismatch) before shipping."
+        "**STATISTICALLY SIGNIFICANT: Variant B is the winner.**\n\n"
+        "Observed lift is significant at the selected confidence level. Validate guardrails "
+        "(SRM, novelty effects, seasonality) before full rollout."
+    )
+elif sig and out["rate_b"] < out["rate_a"]:
+    st.warning(
+        "**STATISTICALLY SIGNIFICANT: Variant A is the winner.**\n\n"
+        "Variant B underperforms at the selected confidence level. Investigate UX and traffic "
+        "quality before another treatment launch."
     )
 else:
     st.info(
-        "**Hold / iterate:** No significant difference detected at this confidence level. "
-        "Consider longer runtimes, larger effect sizes, or stratified analysis."
+        "**INCONCLUSIVE: More data required.**\n\n"
+        "Current evidence does not separate variants at the selected alpha. Extend runtime, "
+        "increase sample size, or segment by key cohorts."
     )
 
 st.divider()
@@ -295,6 +318,37 @@ chart_conv = (error_bars + points).properties(
     width=500,
 )
 st.altair_chart(chart_conv, use_container_width=True)
+
+st.markdown("#### Confidence interval overlap (uncertainty distribution)")
+se_a = np.sqrt(max(out["rate_a"] * (1 - out["rate_a"]) / out["n_a"], 0.0))
+se_b = np.sqrt(max(out["rate_b"] * (1 - out["rate_b"]) / out["n_b"], 0.0))
+dist_df = pd.concat(
+    [
+        _normal_pdf_grid(out["rate_a"], se_a, "Group A"),
+        _normal_pdf_grid(out["rate_b"], se_b, "Group B"),
+    ],
+    ignore_index=True,
+)
+dist_chart = (
+    alt.Chart(dist_df)
+    .mark_area(opacity=0.35)
+    .encode(
+        x=alt.X("rate:Q", title="Conversion rate", axis=alt.Axis(format="%"), scale=alt.Scale(domain=[0, 1])),
+        y=alt.Y("density:Q", title="Relative likelihood"),
+        color=alt.Color(
+            "group:N",
+            title="Group",
+            scale=alt.Scale(domain=["Group A", "Group B"], range=["#253858", "#0052CC"]),
+        ),
+        tooltip=[
+            alt.Tooltip("group:N", title="Group"),
+            alt.Tooltip("rate:Q", title="Rate", format=".2%"),
+            alt.Tooltip("density:Q", title="Density", format=".3f"),
+        ],
+    )
+    .properties(height=320, title="Approximate overlap of conversion-rate uncertainty")
+)
+st.altair_chart(dist_chart, use_container_width=True)
 
 dl1, dl2 = st.columns([1, 4])
 with dl1:
