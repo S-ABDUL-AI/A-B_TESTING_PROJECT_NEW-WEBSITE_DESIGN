@@ -47,28 +47,12 @@ _TRUST_CSS = """
         margin: 16px 0 8px 0;
         border: 1px solid #e2e8f0;
         background: #f8fafc;
+        border-left-width: 5px;
+        border-left-style: solid;
     }
-    .ab-insight-kicker { color: #0052CC; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+    .ab-insight-kicker { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
     .ab-insight-lead { color: #253858; font-size: 1.25rem; font-weight: 800; line-height: 1.35; margin: 10px 0 12px 0; }
     .ab-insight-body { color: #334155; font-size: 0.98rem; line-height: 1.55; }
-    .ab-chart-narrative {
-        margin: 14px 0 20px 0;
-        padding: 14px 16px 16px 16px;
-        border-radius: 10px;
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-left: 5px solid #0052CC;
-    }
-    .ab-chart-narrative .ab-chart-narrative-title {
-        color: #64748b;
-        font-size: 0.72rem;
-        font-weight: 700;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        margin-bottom: 10px;
-    }
-    .ab-chart-narrative p { margin: 0 0 8px 0; font-size: 0.95rem; line-height: 1.55; color: #334155; }
-    .ab-chart-narrative p:last-child { margin-bottom: 0; }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -340,50 +324,6 @@ else:
         "or increase power before making a launch decision."
     )
 
-# --- Storytelling: bold executive insight ---
-if b_wins:
-    insight_lead = (
-        f"Ship variant **B** toward staged rollout: observed **+{lift_pp:.2f} pp** "
-        f"({rel:+.1f}% relative vs A) with statistical backing."
-        if rel == rel
-        else f"Ship variant **B** toward staged rollout: observed **+{lift_pp:.2f} pp** with statistical backing."
-    )
-    insight_body = (
-        "Next: confirm **sample ratio mismatch (SRM)**, **novelty/holdout**, and **cohort slices** "
-        "(device, geography) before promoting to 100%. Document the decision in your experiment log."
-    )
-elif a_wins:
-    insight_lead = (
-        f"**Hold** treatment B: it trails control by **{abs(lift_pp):.2f} pp** "
-        f"({rel:.1f}% relative vs A) with significance."
-        if rel == rel
-        else f"**Hold** treatment B: it trails control by **{abs(lift_pp):.2f} pp** with significance."
-    )
-    insight_body = (
-        "Next: qualitative review of B (UX, latency, audience mismatch), then iterate the treatment "
-        "or run a follow-up with a clearer hypothesis."
-    )
-else:
-    insight_lead = (
-        "**No launch decision yet** — uncertainty intervals overlap enough that the test cannot "
-        "separate A and B at this alpha."
-    )
-    insight_body = (
-        "Next: run longer, raise traffic split, or pre-register a **minimum detectable effect (MDE)** "
-        "so stakeholders know when to stop."
-    )
-
-st.markdown(
-    f"""
-<div class="ab-insight-box">
-  <div class="ab-insight-kicker">Executive insight</div>
-  <div class="ab-insight-lead">{insight_lead}</div>
-  <div class="ab-insight-body">{insight_body}</div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
-
 st.divider()
 
 # --- Input parameters (read-only summary; widgets in sidebar) ---
@@ -415,41 +355,86 @@ ci_chart_df = pd.DataFrame(
     }
 )
 
-# Same hexes as the KPI card left-border accents (straight-through brand consistency)
-ci_scale = alt.Scale(domain=["A", "B"], range=[accent_a, accent_b])
-# labelOverlap=False + explicit bottom orient prevents Vega-Lite from auto-rotating A/B when the
-# chart is narrow (e.g. Streamlit full-width layout).
-x_axis_variant = alt.X(
+if b_wins:
+    ci_colors = ["#64748b", "#0d9488"]
+elif a_wins:
+    ci_colors = ["#0d9488", "#d97706"]
+else:
+    ci_colors = ["#475569", "#0052CC"]
+
+# Narrative accent matches the chart / KPI winner styling
+if b_wins:
+    narrative_accent = ci_colors[1]
+elif a_wins:
+    narrative_accent = ci_colors[0]
+else:
+    narrative_accent = COL_NEUTRAL
+
+if b_wins:
+    insight_lead = (
+        f"Ship variant <strong>B</strong> toward staged rollout: observed "
+        f"<strong>+{lift_pp:.2f} pp</strong> ({rel:+.1f}% relative vs A) with statistical backing."
+        if rel == rel
+        else f"Ship variant <strong>B</strong> toward staged rollout: observed "
+        f"<strong>+{lift_pp:.2f} pp</strong> with statistical backing."
+    )
+    insight_body = (
+        "Next: confirm <strong>sample ratio mismatch (SRM)</strong>, <strong>novelty / holdout</strong>, "
+        "and <strong>cohort slices</strong> (device, geography) before promoting to 100%. "
+        "Document the decision in your experiment log."
+    )
+elif a_wins:
+    insight_lead = (
+        f"<strong>Hold</strong> treatment B: it trails control by <strong>{abs(lift_pp):.2f} pp</strong> "
+        f"({rel:.1f}% relative vs A) with significance."
+        if rel == rel
+        else f"<strong>Hold</strong> treatment B: it trails control by <strong>{abs(lift_pp):.2f} pp</strong> "
+        "with significance."
+    )
+    insight_body = (
+        "Next: qualitative review of B (UX, latency, audience mismatch), then iterate the treatment "
+        "or run a follow-up with a clearer hypothesis."
+    )
+else:
+    insight_lead = (
+        "<strong>No launch decision yet</strong> — uncertainty intervals overlap enough that the test "
+        "cannot separate A and B at this alpha."
+    )
+    insight_body = (
+        "Next: run longer, raise traffic split, or pre-register a <strong>minimum detectable effect (MDE)</strong> "
+        "so stakeholders know when to stop."
+    )
+
+ci_scale = alt.Scale(domain=["A", "B"], range=ci_colors)
+
+x_variant = alt.X(
     "group:N",
     title="Variant",
     sort=["A", "B"],
     axis=alt.Axis(
-        orient="bottom",
         labelAngle=0,
-        labelOverlap=False,
-        labelAlign="center",
-        labelBaseline="alphabetic",
+        labelBaseline="middle",
+        labelFontSize=15,
         labelFontWeight="bold",
-        labelFontSize=14,
         titleFontWeight="bold",
-        titlePadding=12,
+        titleFontSize=14,
         labelPadding=10,
+        domainColor="#cbd5e1",
     ),
 )
-_rate_scale = alt.Scale(domain=[0, 1])
-_rate_axis = alt.Axis(format="%", titleFontWeight="bold")
+y_rate = alt.Y(
+    "conversion_rate:Q",
+    title="Conversion rate",
+    scale=alt.Scale(domain=[0, 1]),
+    axis=alt.Axis(format="%", titleFontWeight="bold", titleFontSize=13),
+)
 
-points = (
+bars = (
     alt.Chart(ci_chart_df)
-    .mark_point(filled=True, size=140, stroke="#fff", strokeWidth=2)
+    .mark_bar(width=56, opacity=0.42)
     .encode(
-        x=x_axis_variant,
-        y=alt.Y(
-            "conversion_rate:Q",
-            title="Conversion rate",
-            scale=_rate_scale,
-            axis=_rate_axis,
-        ),
+        x=x_variant,
+        y=y_rate,
         color=alt.Color("group:N", scale=ci_scale, legend=alt.Legend(title="Variant")),
         tooltip=[
             alt.Tooltip("group:N", title="Group"),
@@ -461,76 +446,39 @@ points = (
 )
 error_bars = (
     alt.Chart(ci_chart_df)
-    .mark_errorbar(thickness=2)
+    .mark_errorbar(thickness=2.5, ticks=True)
     .encode(
-        x=x_axis_variant,
-        y=alt.Y("ci_low:Q", scale=_rate_scale, axis=None),
+        x=x_variant,
+        y=alt.Y("ci_low:Q", title="Conversion rate", scale=alt.Scale(domain=[0, 1]), axis=alt.Axis(format="%")),
         y2="ci_high:Q",
         color=alt.Color("group:N", scale=ci_scale, legend=None),
     )
 )
+points = (
+    alt.Chart(ci_chart_df)
+    .mark_point(filled=True, size=120, stroke="#fff", strokeWidth=2)
+    .encode(
+        x=x_variant,
+        y=y_rate,
+        color=alt.Color("group:N", scale=ci_scale, legend=None),
+        tooltip=[
+            alt.Tooltip("group:N", title="Group"),
+            alt.Tooltip("conversion_rate:Q", title="Rate", format=".2%"),
+            alt.Tooltip("ci_low:Q", title="CI low", format=".2%"),
+            alt.Tooltip("ci_high:Q", title="CI high", format=".2%"),
+        ],
+    )
+)
 chart_conv = (
-    (error_bars + points)
+    (bars + error_bars + points)
+    .resolve_scale(y="shared")
     .properties(
-        title=alt.TitleParams(
-            text=f"{int(confidence_level * 100)}% confidence intervals — conversion rate by variant",
-            fontSize=16,
-            fontWeight="bold",
-            color="#253858",
-            anchor="start",
-        ),
-        width=520,
-        height=420,
+        title=f"Conversion rate by variant — {int(confidence_level * 100)}% confidence intervals (Wald)",
+        height=440,
     )
-    .configure_axisX(
-        labelAngle=0,
-        labelOverlap=False,
-        labelFontWeight="bold",
-        labelFontSize=14,
-        titleFontWeight="bold",
-    )
-    .configure_axisY(titleFontWeight="bold")
-    .configure_axisBottom(
-        labelAngle=0,
-        labelOverlap=False,
-        labelFontWeight="bold",
-        labelFontSize=14,
-    )
-    .configure_view(stroke=None)
+    .configure_axisX(labelAngle=0)
 )
-# theme=None avoids Streamlit's Altair theme re-tuning categorical label angles.
-st.altair_chart(chart_conv, use_container_width=True, theme=None)
-
-chart_story_a = (
-    f'<span style="color:{accent_a};font-weight:800;">Group A</span> (control) is at '
-    f"<strong>{out['rate_a']:.2%}</strong> with a {int(confidence_level * 100)}% interval "
-    f"<strong>{out['lo_a']:.1%}–{out['hi_a']:.1%}</strong>."
-)
-chart_story_b = (
-    f'<span style="color:{accent_b};font-weight:800;">Group B</span> (treatment) is at '
-    f"<strong>{out['rate_b']:.2%}</strong> with a {int(confidence_level * 100)}% interval "
-    f"<strong>{out['lo_b']:.1%}–{out['hi_b']:.1%}</strong>."
-)
-chart_story_lift = (
-    f"The point gap is <strong>{lift_pp:+.2f} pp</strong>"
-    + (
-        f" (<strong>{rel:+.1f}%</strong> relative vs A)."
-        if rel == rel
-        else "."
-    )
-    + " Bars use the <strong>same accent colors</strong> as the KPI row above."
-)
-st.markdown(
-    f"""
-<div class="ab-chart-narrative" style="border-left-color:{accent_lift};">
-  <div class="ab-chart-narrative-title">Insight narrative · matches KPI palette</div>
-  <p>{chart_story_a}</p>
-  <p>{chart_story_b}</p>
-  <p>{chart_story_lift}</p>
-</div>
-""",
-    unsafe_allow_html=True,
-)
+st.altair_chart(chart_conv, use_container_width=True)
 
 st.markdown("#### Confidence interval overlap (uncertainty distribution)")
 se_a = np.sqrt(max(out["rate_a"] * (1 - out["rate_a"]) / out["n_a"], 0.0))
@@ -542,8 +490,6 @@ dist_df = pd.concat(
     ],
     ignore_index=True,
 )
-dist_colors = [accent_a, accent_b]
-
 dist_chart = (
     alt.Chart(dist_df)
     .mark_area(opacity=0.38)
@@ -553,7 +499,7 @@ dist_chart = (
         color=alt.Color(
             "group:N",
             title="Group",
-            scale=alt.Scale(domain=["Group A", "Group B"], range=dist_colors),
+            scale=alt.Scale(domain=["Group A", "Group B"], range=ci_colors),
         ),
         tooltip=[
             alt.Tooltip("group:N", title="Group"),
@@ -564,6 +510,23 @@ dist_chart = (
     .properties(height=320, title="Approximate overlap of conversion-rate uncertainty")
 )
 st.altair_chart(dist_chart, use_container_width=True)
+
+chip_a, chip_b = ci_colors[0], ci_colors[1]
+st.markdown(
+    f"""
+<div class="ab-insight-box" style="border-left-color:{narrative_accent};">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
+    <span style="font-weight:800;font-size:1rem;color:{chip_a};letter-spacing:0.04em;">VARIANT A</span>
+    <span style="color:#cbd5e1;font-weight:600;">·</span>
+    <span style="font-weight:800;font-size:1rem;color:{chip_b};letter-spacing:0.04em;">VARIANT B</span>
+  </div>
+  <div class="ab-insight-kicker" style="color:{narrative_accent};">Executive insight</div>
+  <div class="ab-insight-lead">{insight_lead}</div>
+  <div class="ab-insight-body">{insight_body}</div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 dl1, dl2 = st.columns([1, 4])
 with dl1:
