@@ -417,18 +417,23 @@ ci_chart_df = pd.DataFrame(
 
 # Same hexes as the KPI card left-border accents (straight-through brand consistency)
 ci_scale = alt.Scale(domain=["A", "B"], range=[accent_a, accent_b])
+# labelOverlap=False + explicit bottom orient prevents Vega-Lite from auto-rotating A/B when the
+# chart is narrow (e.g. Streamlit full-width layout).
 x_axis_variant = alt.X(
     "group:N",
     title="Variant",
     sort=["A", "B"],
     axis=alt.Axis(
+        orient="bottom",
         labelAngle=0,
+        labelOverlap=False,
         labelAlign="center",
-        labelBaseline="middle",
+        labelBaseline="alphabetic",
         labelFontWeight="bold",
         labelFontSize=14,
         titleFontWeight="bold",
         titlePadding=12,
+        labelPadding=10,
     ),
 )
 _rate_scale = alt.Scale(domain=[0, 1])
@@ -474,13 +479,27 @@ chart_conv = (
             color="#253858",
             anchor="start",
         ),
+        width=520,
         height=420,
     )
-    .configure_axisX(labelAngle=0, labelFontWeight="bold", labelFontSize=14, titleFontWeight="bold")
+    .configure_axisX(
+        labelAngle=0,
+        labelOverlap=False,
+        labelFontWeight="bold",
+        labelFontSize=14,
+        titleFontWeight="bold",
+    )
     .configure_axisY(titleFontWeight="bold")
+    .configure_axisBottom(
+        labelAngle=0,
+        labelOverlap=False,
+        labelFontWeight="bold",
+        labelFontSize=14,
+    )
     .configure_view(stroke=None)
 )
-st.altair_chart(chart_conv, use_container_width=True)
+# theme=None avoids Streamlit's Altair theme re-tuning categorical label angles.
+st.altair_chart(chart_conv, use_container_width=True, theme=None)
 
 chart_story_a = (
     f'<span style="color:{accent_a};font-weight:800;">Group A</span> (control) is at '
